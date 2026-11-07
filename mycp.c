@@ -9,11 +9,11 @@
 #include <sys/types.h>
 #include <limits.h>
 
+
 #define BUF_SIZE 1024
 char temp_buf[BUF_SIZE];
 char buf_for_fd2[PATH_MAX];
 char buf[PATH_MAX];	
-char path[PATH_MAX];
 char temp_path[PATH_MAX];
 int fd_1, fd_2;
 int* fd1 = &fd_1;
@@ -23,15 +23,17 @@ int dir_fd2;
 char* wf;
 DIR* dir;
 DIR* dir2;
+DIR* temp_dir;
 size_t pindex = 0;
 bool is_folder = false;
 
-void def_files_copy(struct dirent* rd, DIR* dir, DIR* dir2, char* temp_buf) {
+void def_files_copy(DIR* dir, DIR* dir2, char* temp_buf) {
+	struct dirent* rd = {0};
 	while ((rd = readdir(dir)) != NULL) {
 			if (strcmp(rd->d_name, ".") == 0 || strcmp(rd->d_name, "..") == 0) {
 			continue;
 			}
-		if (rd->d_type != DT_DIR) {
+			if (rd->d_type != DT_DIR) {
 			dir_fd = dirfd(dir);
 			fd_1 = openat(dir_fd, rd->d_name, O_RDONLY);
 			if (fd_1 == - 1) {
@@ -50,6 +52,7 @@ void def_files_copy(struct dirent* rd, DIR* dir, DIR* dir2, char* temp_buf) {
 			len = readlink(linkpath, buf, sizeof(buf) - 1);
 			if (len != -1) {
 				buf[len] = '\0';
+				fprintf(stderr, "linkpath for fd_1 CHECK:%s\n", buf);
 			} else {
 				fprintf(stderr, "path getting error for fd_1");
 			}
@@ -58,6 +61,8 @@ void def_files_copy(struct dirent* rd, DIR* dir, DIR* dir2, char* temp_buf) {
 			len = readlink(linkpath, buf, sizeof(buf) - 1);
 			if (len != -1) {
 				buf[len] = '\0';
+				fprintf(stderr, "linkpath for fd_2 CHECK:%s\n", buf);
+
 			} else {
 				fprintf(stderr, "path getting error for fd_2");
 			}
@@ -81,22 +86,25 @@ void def_files_copy(struct dirent* rd, DIR* dir, DIR* dir2, char* temp_buf) {
 					total_written += stw;
 				}
 			}
-		} else {
-			is_folder = true;
-		}		
+			} else {
+				is_folder = true;
+			}		
 	} 	
+	fprintf(stderr, "DID COPY\n");
 	close(*fd2);
 	close(*fd1);
 	closedir(dir);
 }
 
 char temp_path[PATH_MAX] = {0};
+struct dirent* global_rd = {0};
 struct dirent* rd = {0};
+bool in_process = true;
 
 void folder_copy(char* path) {
 	fprintf(stderr, "PATH AT START OF FOLDER COPY FUNC: %s\n", path);
-	if ((dir = opendir(path)) == nullptr) {
-		fprintf(stderr, "OPEN DIR PROBLEM\n", strerror(errno));
+	if ((temp_dir = opendir(path)) == nullptr) {
+		fprintf(stderr, "OPEN DIR PROBLEM: %s\n", strerror(errno));
 		exit(EXIT_FAILURE); 
 	}
 
@@ -122,30 +130,45 @@ void folder_copy(char* path) {
 	}
 
 	dir2 = opendir(buf_for_fd2);
-	struct dirent *rd_temp = rd;
 	is_folder = false;
-	def_files_copy(rd_temp, dir, dir2, temp_buf);
 	
-	dir = opendir(path);
-	dir2 = opendir(buf_for_fd2);
+	while ((global_rd = readdir(dir)) != NULL && !in_process) {
+		if (strcmp(global_rd->d_name, ".") == 0 || strcmp(global_rd->d_name, "..") == 0)
+		continue;
+		if (global_rd->d_type == DT_DIR) {
+			snprintf(path, PATH_MAX, "%s", global_rd->d_name);
+			in_process = true;
+			folder_copy(path); 
+		}
+	}
+	
+	def_files_copy(temp_dir, dir2, temp_buf);
 
-	if (!is_folder && (rd == NULL)) {
+	if (global_rd == NULL && !is_folder) {
 		fprintf(stderr, "PATH AT END OF FOLDER COPY FUNC: %s", path);
-		exit(EXIT_SUCCESS);
+		exit(EXIT_SUCCESS);		
 	} else {
-		while ((rd = readdir(dir)) != NULL) {
-			if (strcmp(rd->d_name, ".") == 0 || strcmp(rd->d_name, "..") == 0) {
+		fprintf(stderr, "BEFORE TEMP_DIR = OPENDIR(PATH): %s\n", path);
+		temp_dir = opendir(path);
+		while ((rd = readdir(temp_dir)) != NULL) {
+			fprintf(stderr, "V WHILE?\n");
+			if (strcmp(rd->d_name, ".") == 0 || strcmp(rd->d_name, "..") == 0)
 			continue;
-			}
 			if (rd->d_type == DT_DIR) {
 				fprintf(stderr, "rd->d_name CHECKER in while%s\n", rd->d_name);
 				snprintf(temp_path + strlen(temp_path), sizeof(temp_path), "/%s", rd->d_name);
+				in_process = true;	
 				folder_copy(temp_path);
 			}
-			snprintf(temp_path, sizeof(temp_path), "%s", path);
-			folder_copy(
 		} 
+		fprintf(stderr, "WE DID WHILE AND PATH NULLING\n");
+		in_process = false;
+		first_slash = strchr(path, '/');
+		*first_slash = '\0';
+		fprintf(stderr, "AFTER WE DID WHILE WHAT PATH IS????%s\n", path );
+		folder_copy(path);
 	}
+	
 }
 
  
@@ -170,14 +193,13 @@ int main(int argc, char *argv[]) {
 	char *rf = argv[optind];
 	wf = argv[optind + 1];
 
-	if (recursive_flag) {
-		snprintf(path, sizeof(path), rf);
-		strncat(temp_path, path, sizeof(path));
-		snprintf(buf_for_fd2, sizeof(buf_for_fd2), wf);
-		folder_copy(path);
-	}
 
-	fprintf(stderr, "CHECK ++++++++++++++");
+	if (recursive_flag) {
+		snprintf(temp_path, sizeof(temp_path), "%s", rf);
+		snprintf(buf_for_fd2, sizeof(buf_for_fd2), wf);
+		dir = opendir(rf);
+		folder_copy(rf);
+	}
 
 	close(*fd1);
 	close(*fd2);
