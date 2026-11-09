@@ -14,18 +14,23 @@
 char temp_buf[BUF_SIZE];
 char buf_for_fd2[PATH_MAX];
 char buf[PATH_MAX];	
-char temp_path[PATH_MAX];
+char path[PATH_MAX];
+char temp_path[PATH_MAX] = {0};
+char* first_slash;
+char* wf;
 int fd_1, fd_2;
 int* fd1 = &fd_1;
 int* fd2 = &fd_2;
 int dir_fd;
 int dir_fd2;
-char* wf;
 DIR* dir;
 DIR* dir2;
 DIR* temp_dir;
+struct dirent* global_rd = {0};
+struct dirent* rd = {0};
 size_t pindex = 0;
 bool is_folder = false;
+bool in_process = true;
 
 void def_files_copy(DIR* dir, DIR* dir2, char* temp_buf) {
 	struct dirent* rd = {0};
@@ -44,30 +49,8 @@ void def_files_copy(DIR* dir, DIR* dir2, char* temp_buf) {
 			if (fd_2 == - 1) {
 				perror("fd_2 error");
 			}
-// T		
+
 			ssize_t len = 0;
-
-			char linkpath[64];
-			snprintf(linkpath, sizeof(linkpath), "/proc/self/fd/%d", fd_1);
-			len = readlink(linkpath, buf, sizeof(buf) - 1);
-			if (len != -1) {
-				buf[len] = '\0';
-				fprintf(stderr, "linkpath for fd_1 CHECK:%s\n", buf);
-			} else {
-				fprintf(stderr, "path getting error for fd_1");
-			}
-
-			snprintf(linkpath, sizeof(linkpath), "/proc/self/fd/%d", fd_2);
-			len = readlink(linkpath, buf, sizeof(buf) - 1);
-			if (len != -1) {
-				buf[len] = '\0';
-				fprintf(stderr, "linkpath for fd_2 CHECK:%s\n", buf);
-
-			} else {
-				fprintf(stderr, "path getting error for fd_2");
-			}
-
-////			 
 			ssize_t str, stw;
 			ssize_t total_written = 0;
 
@@ -90,88 +73,87 @@ void def_files_copy(DIR* dir, DIR* dir2, char* temp_buf) {
 				is_folder = true;
 			}		
 	} 	
-	fprintf(stderr, "DID COPY\n");
 	close(*fd2);
 	close(*fd1);
-	closedir(dir);
 }
 
-char temp_path[PATH_MAX] = {0};
-struct dirent* global_rd = {0};
-struct dirent* rd = {0};
-bool in_process = true;
-
 void folder_copy(char* path) {
-	fprintf(stderr, "PATH AT START OF FOLDER COPY FUNC: %s\n", path);
-	if ((temp_dir = opendir(path)) == nullptr) {
-		fprintf(stderr, "OPEN DIR PROBLEM: %s\n", strerror(errno));
-		exit(EXIT_FAILURE); 
-	}
 
-	char* first_slash = strchr(path, '/');
-	if (first_slash != NULL) {
-		snprintf(buf_for_fd2 + strlen(buf_for_fd2), sizeof(buf_for_fd2), "%s", first_slash);  
-		fprintf(stderr, "CHECK WHAT IS BUF_FOR_FD2 %s\n", buf_for_fd2);
-		if (mkdir(buf_for_fd2, 0777) == -1 ) {
-			if (errno != EEXIST) {
-			perror("CAN'T CREATE FOLDER\n");
-			}
-		} else {
-			fprintf(stderr, "FOLDER %s CREATED!\n", buf_for_fd2);
-		}
-	} else {
-		if (mkdir(buf_for_fd2, 0777) == -1 ) {
-			if (errno != EEXIST) {
-			perror("CAN'T CREATE FOLDER\n");
-			}
-		} else {
-			fprintf(stderr, "FOLDER %s CREATED!\n", buf_for_fd2);
-		}		
-	}
-
-	dir2 = opendir(buf_for_fd2);
-	is_folder = false;
+	is_folder = false;	
 	
 	while ((global_rd = readdir(dir)) != NULL && !in_process) {
 		if (strcmp(global_rd->d_name, ".") == 0 || strcmp(global_rd->d_name, "..") == 0)
 		continue;
 		if (global_rd->d_type == DT_DIR) {
-			snprintf(path, PATH_MAX, "%s", global_rd->d_name);
-			in_process = true;
-			folder_copy(path); 
+			snprintf(path + strlen(path), sizeof(path) - strlen(path), "/%s", global_rd->d_name);
+			first_slash = strchr(buf_for_fd2, '/');
+			*first_slash = '\0';
+			snprintf(buf_for_fd2 + strlen(buf_for_fd2), sizeof(buf_for_fd2) - strlen(buf_for_fd2), "/%s", global_rd->d_name);
+
+			if (mkdir(path, 0777) == -1 ) {
+				if (errno != EEXIST) {
+				perror("CAN'T CREATE FOLDER\n");
+				}
+			} else {
+				fprintf(stderr, "FOLDER FOR PATH %s CREATED!\n", path);
+			}
+
+			if (mkdir(buf_for_fd2, 0777) == -1 ) {
+				if (errno != EEXIST) {
+				perror("CAN'T CREATE FOLDER\n");
+				}
+			} else {
+				fprintf(stderr, "FOLDER FOR BUF_FOR_FD_2 %s CREATED!\n", buf_for_fd2);
+			} 
 		}
 	}
-	
+
+	if (mkdir(path, 0777) == -1 ) {
+		if (errno != EEXIST) {
+			perror("CAN'T CREATE FOLDER\n");
+		}
+		} else {
+			fprintf(stderr, "FOLDER FOR PATH %s CREATED!\n", path);
+		}
+
+		if (mkdir(buf_for_fd2, 0777) == -1 ) {
+			if (errno != EEXIST) {
+			perror("CAN'T CREATE FOLDER\n");
+			}
+		} else {
+			fprintf(stderr, "FOLDER FOR BUF_FOR_FD_2 %s CREATED!\n", buf_for_fd2);
+	}
+
+	closedir(temp_dir);
+	temp_dir = opendir(path);
+	dir2 = opendir(buf_for_fd2);
+
 	def_files_copy(temp_dir, dir2, temp_buf);
+	closedir(dir2);
+	rewinddir(temp_dir);	
 
 	if (global_rd == NULL && !is_folder) {
-		fprintf(stderr, "PATH AT END OF FOLDER COPY FUNC: %s", path);
+		closedir(temp_dir);
 		exit(EXIT_SUCCESS);		
 	} else {
-		fprintf(stderr, "BEFORE TEMP_DIR = OPENDIR(PATH): %s\n", path);
-		temp_dir = opendir(path);
 		while ((rd = readdir(temp_dir)) != NULL) {
-			fprintf(stderr, "V WHILE?\n");
 			if (strcmp(rd->d_name, ".") == 0 || strcmp(rd->d_name, "..") == 0)
 			continue;
 			if (rd->d_type == DT_DIR) {
-				fprintf(stderr, "rd->d_name CHECKER in while%s\n", rd->d_name);
-				snprintf(temp_path + strlen(temp_path), sizeof(temp_path), "/%s", rd->d_name);
-				in_process = true;	
-				folder_copy(temp_path);
+				snprintf(path + strlen(path), sizeof(path), "/%s", rd->d_name);
+				snprintf(buf_for_fd2 + strlen(buf_for_fd2), sizeof(buf_for_fd2), "/%s", rd->d_name);
+				in_process = true;
+				folder_copy(path);
 			}
 		} 
-		fprintf(stderr, "WE DID WHILE AND PATH NULLING\n");
 		in_process = false;
 		first_slash = strchr(path, '/');
 		*first_slash = '\0';
-		fprintf(stderr, "AFTER WE DID WHILE WHAT PATH IS????%s\n", path );
 		folder_copy(path);
 	}
 	
 }
 
- 
 int main(int argc, char *argv[]) {
 	int opt;
 	bool recursive_flag = false;
@@ -190,19 +172,17 @@ int main(int argc, char *argv[]) {
 		fprintf(stderr, "Ошибка: Не указан источник или цель\n");
 		exit(EXIT_FAILURE);
 	}
+
 	char *rf = argv[optind];
 	wf = argv[optind + 1];
 
-
 	if (recursive_flag) {
-		snprintf(temp_path, sizeof(temp_path), "%s", rf);
+		snprintf(path, sizeof(temp_path), "%s", rf);
 		snprintf(buf_for_fd2, sizeof(buf_for_fd2), wf);
-		dir = opendir(rf);
-		folder_copy(rf);
+		dir = opendir(path);
+		folder_copy(path);
 	}
-
-	close(*fd1);
-	close(*fd2);
+	
 }
 
 
