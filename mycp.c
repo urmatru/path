@@ -12,15 +12,6 @@
 
 
 #define BUF_SIZE 1024
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdbool.h>
-#include <dirent.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <limits.h>
-#include <errno.h>
 
 char temp_buf[BUF_SIZE];
 char buf_for_fd2[PATH_MAX];
