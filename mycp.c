@@ -36,6 +36,8 @@ bool in_process = true;
 
 void def_files_copy(DIR* dir, DIR* dir2, char* temp_buf) {
         struct dirent* rd = {0};
+	is_folder = false;
+
         while ((rd = readdir(dir)) != NULL) {
                 if (strcmp(rd->d_name, ".") == 0 || strcmp(rd->d_name, "..") == 0) {
                 continue;
@@ -77,11 +79,10 @@ void def_files_copy(DIR* dir, DIR* dir2, char* temp_buf) {
         }
         close(*fd2);
         close(*fd1);
+	closedir(dir2);
 }
 
 void folder_copy(char* path) {
-
-        is_folder = false;
 
         while ((global_rd = readdir(dir)) != NULL && !in_process) {
                 if (strcmp(global_rd->d_name, ".") == 0 || strcmp(global_rd->d_name, "..") == 0)
@@ -109,31 +110,14 @@ void folder_copy(char* path) {
                         }
                 }
         }
-
-        if (mkdir(path, 0777) == -1 ) {
-                if (errno != EEXIST) {
-                        perror("CAN'T CREATE FOLDER\n");
-                }
-                } else {
-                        fprintf(stderr, "FOLDER FOR PATH %s CREATED!\n", path);
-                }
-
-                if (mkdir(buf_for_fd2, 0777) == -1 ) {
-                        if (errno != EEXIST) {
-                        perror("CAN'T CREATE FOLDER\n");
-                        }
-                } else {
-                        fprintf(stderr, "FOLDER FOR BUF_FOR_FD_2 %s CREATED!\n", buf_for_fd2);
-        }
-
-
-        temp_dir = opendir(path);
-        dir2 = opendir(buf_for_fd2);
-
-        def_files_copy(temp_dir, dir2, temp_buf);
-        rewinddir(temp_dir);
+	dir2 = opendir(buf_for_fd2);
+	temp_dir = opendir(path);
+	def_files_copy(temp_dir, dir2, temp_buf);
+	rewinddir(temp_dir);
 
         if (global_rd == NULL && !is_folder) {
+		closedir(temp_dir);
+		closedir(dir);
                 exit(EXIT_SUCCESS);
         } else {
                 while ((rd = readdir(temp_dir)) != NULL) {
@@ -142,10 +126,12 @@ void folder_copy(char* path) {
                         if (rd->d_type == DT_DIR) {
                                 snprintf(path + strlen(path), sizeof(path), "/%s", rd->d_name);
                                 snprintf(buf_for_fd2 + strlen(buf_for_fd2), sizeof(buf_for_fd2), "/%s", rd->d_name);
-                                in_process = true;
+                                closedir(temp_dir);
+				in_process = true;
                                 folder_copy(path);
                         }
                 }
+		closedir(temp_dir);
                 in_process = false;
                 first_slash = strchr(path, '/');
                 *first_slash = '\0';
@@ -183,8 +169,5 @@ int main(int argc, char *argv[]) {
                 folder_copy(path);
         }
 
-        closedir(dir);
-        closedir(dir2);
-        closedir(temp_dir);
 }
 
