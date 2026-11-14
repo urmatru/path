@@ -12,10 +12,19 @@
 #include <sys/wait.h>
 
 extern char** environ;	
+bool redirect = false;
 
 void line_parser(char* line, char* sh_argv[]) {
 	int i = 0;
-	sh_argv[i] = strtok(line, " ");
+	if (*line == '"') {
+		char* line_copy = line;
+		while (*line_copy != '\"') { // ОТСЮДА
+			line_copy++;
+		}
+		sh_argv[i] = strtok(line, line_copy + 1);
+	} else {
+		sh_argv[i] = strtok(line, " ");
+	}
 
 	while (sh_argv[i] != NULL) {
 		i++;
@@ -61,10 +70,73 @@ void builtin_exit(char** argv) {
 	exit(0);
 }
 
-void builtin_echo(char** argv) {
+void remove_quotes(char *arg) {
+	if (!arg) return;
 	
+	size_t rind = 0;
+	size_t wind = 0;
+	bool in_single = false;
+	bool in_double = false;
+
+	while (arg[rind] != '\0') {
+		char c = arg[rind];
+		if (c == '\'' && !in_double) {
+			in_single = !in_single;
+		} else if (c == '"' && !in_single) {
+			in_double = !in_double;
+		} else {
+			arg[wind] = c;
+			wind++;
+		}
+		rind++;
+	}
+	
+	arg[wind] = '\0';
 }
 
+void clean_argv_quotes(char **argv) {
+	if (!argv) return;
+
+	for (int i = 0; argv[i] != NULL; i++) {
+		remove_quotes(argv[i]);
+	}
+}
+
+void builtin_echo(char** argv) {
+	int i = 1;
+	int fd = 0;	
+	char** argv_copy;
+
+	if (redirect) {
+		argv_copy = argv;
+		while (*argv_copy) {
+		argv_copy++;
+		}
+
+		fprintf(stderr, "FILE ARGV COPY: %s\n", *--argv_copy); 
+		fd = open(*argv_copy, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+		if (fd == -1) {
+			perror("FD OPEN ERROR\n");
+			exit(EXIT_FAILURE);
+		}
+		dup2(fd, STDOUT_FILENO);
+	}
+
+	argv_copy = argv;
+	clean_argv_quotes(argv_copy);
+
+	while (argv_copy[i] != NULL) {
+		fprintf(stderr, "argv[i]: %s\n", argv[i]);
+		fputs(argv[i], stdout);
+		if (argv[i + 1] != NULL) {
+			putchar(' ');
+		}
+		i++;
+		argv_copy++;
+	}
+	exit(EXIT_SUCCESS);
+	putchar('\n');
+}
 
 struct builtin {
 	char *name;
@@ -94,19 +166,19 @@ int main(/*int argc, char* argv[]*/) {
 		};
 		char* sh_argv[10] = {0};
 		line_parser(line, sh_argv);
-		
+
 		char** current_arg = sh_argv;
 		char* filename;
-		bool redirect = false;
 
 		while (*current_arg != NULL) {
 			if (strcmp(*current_arg, ">") == 0) {
-			char* filename = *(current_arg + 1);
-			snprintf(*current_arg, sizeof(current_arg), filename); //  
-			bool redirect = true;
+			filename = *(current_arg + 1);
+			*current_arg = strdup(filename);
+			*(current_arg + 1) = NULL ;
+			redirect = true;
 			break;
 			} else if (strcmp(*current_arg, "<") == 0) {
-			char* filename = *(current_arg + 1);
+			filename = *(current_arg + 1);
 			break;	
 			}
 			current_arg++;
@@ -123,9 +195,10 @@ int main(/*int argc, char* argv[]*/) {
 			i++;
 		}
 
-		pid_t pid = fork();
-		
 		if (!struct_dect) {
+
+		pid_t pid = fork();
+
 		if (pid < 0) {
 			perror("fork failed");
 		} else if (pid == 0) {
@@ -150,11 +223,6 @@ int main(/*int argc, char* argv[]*/) {
 				}
 			}								//
 
-			if (redirect) {	
-				int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-				dup2(fd, STDOUT_FILENO);
-			}
-	
 			execve(sh_argv[0], sh_argv, environ);
 			perror("execve failed");
 			exit(EXIT_FAILURE);
