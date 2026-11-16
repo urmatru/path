@@ -10,27 +10,27 @@
 #include <limits.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/syscall.h>
 
 extern char** environ;	
 bool redirect = false;
 
+struct linux_dirent64 {
+	ino64_t	d_ino;  // inode number
+	off64_t 	d_off;  // next structure offset
+	unsigned short  d_reclen;  // size of this dirent
+	unsigned char	d_type;    // file type
+	char		d_name[]; // filename
+}; 
+
 void line_parser(char* line, char* sh_argv[]) {
 	int i = 0;
-	if (*line == '"') {
-		char* line_copy = line;
-		while (*line_copy != '\"') { // ОТСЮДА
-			line_copy++;
-		}
-		sh_argv[i] = strtok(line, line_copy + 1);
-	} else {
-		sh_argv[i] = strtok(line, " ");
-	}
+	sh_argv[i] = strtok(line, " ");
 
 	while (sh_argv[i] != NULL) {
 		i++;
 		sh_argv[i] = strtok(NULL, " ");
 	}		
-
 }
 
 int check_file_rights(const char *filepath) {
@@ -59,12 +59,60 @@ void builtin_cd (char** argv) {
 	}
 }
 
-/* void builtin_ls (char** argv) {
-	if (getdents64() == -1) {
-		perror("ls");
-		return;
+void builtin_ls (char** argv) {
+	const char *dir_path;
+	int fd_std = 0;
+
+	if (redirect) {
+		dir_path = ".";
+		fd_std = open(argv[1], O_WRONLY | O_CREAT | O_TRUNC, 0644);
+		if (fd_std == -1) {
+			perror("FD OPEN ERROR\n");
+			exit(EXIT_FAILURE);
+		}
+		dup2(fd_std, STDOUT_FILENO);
+	} else {
+		dir_path = (argv[1] != NULL) ? argv[1] : ".";
 	}
-} */
+
+	int fd = open(dir_path, O_RDONLY | O_DIRECTORY);
+
+	if (fd == -1) {
+		perror("ls: open");
+		exit(EXIT_FAILURE);
+	}
+	
+	char buf[1024];
+	long nread;
+
+	while (true) {
+		nread = syscall(SYS_getdents64, fd, buf, sizeof(buf));
+		if (nread == -1) {
+			perror("ls: nread");
+			exit(EXIT_FAILURE);
+		}
+		if (nread == 0) {
+			break;
+		} 
+		
+		for (int bpos = 0; bpos < nread;) {
+			struct linux_dirent64 *d = (struct linux_dirent64 *) (buf + bpos);
+
+			if (redirect) {
+				fprintf(stderr, "CHECK RED\n");
+				fputs(d->d_name, stdout);
+			} else {
+				fprintf(stderr, "CHECK NONRED\n");
+				printf("%s ", d->d_name);
+			}			
+			bpos += d->d_reclen;
+		}	
+	
+		printf("\n");
+		close(fd);	
+	}
+
+} 
 
 void builtin_exit(char** argv) {
 	exit(0);
@@ -106,6 +154,7 @@ void builtin_echo(char** argv) {
 	int i = 1;
 	int fd = 0;	
 	char** argv_copy;
+	int saved_stdout = dup(STDOUT_FILENO);
 
 	if (redirect) {
 		argv_copy = argv;
@@ -113,13 +162,14 @@ void builtin_echo(char** argv) {
 		argv_copy++;
 		}
 
-		fprintf(stderr, "FILE ARGV COPY: %s\n", *--argv_copy); 
-		fd = open(*argv_copy, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+		//fprintf(stderr, "FILE ARGV COPY: %s\n", *--argv_copy); 
+		fd = open(*--argv_copy, O_WRONLY | O_CREAT | O_TRUNC, 0644);
 		if (fd == -1) {
 			perror("FD OPEN ERROR\n");
 			exit(EXIT_FAILURE);
 		}
 		dup2(fd, STDOUT_FILENO);
+		close(fd);
 	}
 
 	argv_copy = argv;
@@ -134,8 +184,11 @@ void builtin_echo(char** argv) {
 		i++;
 		argv_copy++;
 	}
-	exit(EXIT_SUCCESS);
+	
 	putchar('\n');
+	dup2(saved_stdout, STDOUT_FILENO);
+	close(saved_stdout);
+	return;
 }
 
 struct builtin {
@@ -164,6 +217,7 @@ int main(/*int argc, char* argv[]*/) {
 			{"exit", builtin_exit}, 
 			{NULL, NULL}
 		};
+
 		char* sh_argv[10] = {0};
 		line_parser(line, sh_argv);
 
