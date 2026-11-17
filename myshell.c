@@ -23,14 +23,45 @@ struct linux_dirent64 {
 	char		d_name[]; // filename
 }; 
 
+
 void line_parser(char* line, char* sh_argv[]) {
 	int i = 0;
-	sh_argv[i] = strtok(line, " ");
+	char *saveptr = 0;
+	sh_argv[i] = strtok_r(line, " ", &saveptr);		// echo "hello world" > file.txt
+	bool space_detected = false;
 
 	while (sh_argv[i] != NULL) {
-		i++;
-		sh_argv[i] = strtok(NULL, " ");
-	}		
+		char* save_ptr_copy;
+		if (saveptr != NULL && *saveptr == '"') {
+			save_ptr_copy = saveptr;
+			save_ptr_copy++;
+			while (*save_ptr_copy != '"') {
+				save_ptr_copy++;
+				if (*save_ptr_copy == ' ') {
+				space_detected = true;
+				}			
+			}
+		}
+
+ 		i++;
+		if (*(saveptr + 1) == '>' || (*(saveptr + 1) == '<')) {
+			sh_argv[i] = strtok_r(saveptr, " ", &saveptr);
+			continue;
+		}
+
+		if (!space_detected) {
+			sh_argv[i] = strtok_r(NULL, " ", &saveptr);
+		} else {
+			sh_argv[i] = strtok_r(NULL, "\"", &saveptr);
+			//fprintf(stderr, "sd sh_argv: %s, saveptr: %s \n", sh_argv[i], saveptr);
+		}
+	}
+
+	/*printf("all args:\n");	
+	for (; i; i--) {
+		printf("ARG:%s\n", sh_argv[i]);
+	} 
+		printf("echo ARG:%s\n", sh_argv[0]); */
 }
 
 int check_file_rights(const char *filepath) {
@@ -140,7 +171,7 @@ void remove_quotes(char *arg) {
 	}
 	
 	arg[wind] = '\0';
-}
+} 
 
 void clean_argv_quotes(char **argv) {
 	if (!argv) return;
@@ -162,18 +193,27 @@ void builtin_echo(char** argv) {
 		argv_copy++;
 		}
 
-		//fprintf(stderr, "FILE ARGV COPY: %s\n", *--argv_copy); 
-		fd = open(*--argv_copy, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+		fprintf(stderr, "FILE ARGV COPY: %s\n", *--argv_copy); 
+		fd = open(*argv_copy, O_WRONLY | O_CREAT | O_TRUNC, 0644);
 		if (fd == -1) {
 			perror("FD OPEN ERROR\n");
 			exit(EXIT_FAILURE);
 		}
+
+		FILE* file = fopen(*argv_copy, "r");
+		if (file == NULL) {
+			perror("FILE OPEN ERROR");
+			exit(EXIT_FAILURE);
+		}
+		fprintf(stderr, "BEFORE FPUTS argv[i]: %s\n", argv[i]);
+		fputs(argv[i], file);
+		putchar('\n');
 		dup2(fd, STDOUT_FILENO);
-		close(fd);
+		close(fd);  
 	}
 
 	argv_copy = argv;
-	clean_argv_quotes(argv_copy);
+	//clean_argv_quotes(argv_copy);
 
 	while (argv_copy[i] != NULL) {
 		fprintf(stderr, "argv[i]: %s\n", argv[i]);
@@ -187,7 +227,7 @@ void builtin_echo(char** argv) {
 	
 	putchar('\n');
 	dup2(saved_stdout, STDOUT_FILENO);
-	close(saved_stdout);
+	close(saved_stdout); 
 	return;
 }
 
@@ -252,7 +292,6 @@ int main(/*int argc, char* argv[]*/) {
 		if (!struct_dect) {
 
 		pid_t pid = fork();
-
 		if (pid < 0) {
 			perror("fork failed");
 		} else if (pid == 0) {
